@@ -1,55 +1,72 @@
-use std::collections::HashMap;
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
-use std::thread;
-
+use std::time::Duration;
+use futures_util::stream::{SplitSink, SplitStream};
 use redis::{Client, Commands, Connection};
-use tungstenite::{accept, Error, WebSocket};
-use uuid::Uuid;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{accept_async, WebSocketStream};
+use futures_util::StreamExt;
+use crate::redis::handle_client_redis;
+use serde_json::Result;
+use serde::{Serialize, Deserialize};
 
-pub type WebSocketConn = Arc<Mutex<WebSocket<TcpStream>>>;
-pub type Conns = HashMap<SocketAddr, WebSocketConn>;
+pub type WebSocketSend = SplitSink<WebSocketStream<TcpStream>, Message>;
+type WebSocketRead = SplitStream<WebSocketStream<TcpStream>>;
 
-pub type ArcConns = Arc<Mutex<Conns>>;
+#[derive(Serialize, Deserialize)]
+struct WebSocketMessage {
+    target_ip: String,
+    content: String
+}
 
-pub fn handle_client_conn(
-    server: TcpListener,
-    connections: ArcConns,
-    node_uid: Uuid,
-    mut redis_client: Client
-) {
-    for stream in server.incoming() {
-        match stream {
-            Ok(stream) => {
-                let peer_addr = stream.peer_addr().unwrap();
-                let websocket = Arc::new(Mutex::new(accept(stream).unwrap()));
-
-                connections.lock().unwrap().insert(peer_addr, Arc::clone(&websocket));
-                println!("connected addr: {}", peer_addr);
-
-                redis_client.hset::<&str, String, String, ()>("users", peer_addr.to_string(), node_uid.to_string()).unwrap();
-
-                let redis_conn = redis_client.get_connection().unwrap();
-                thread::spawn(move || handle_client_messages(Arc::clone(&websocket), redis_conn, node_uid));
-            }
-            Err(e) => {
-                eprintln!("Error: {}", e);
-            }
-        }
+impl WebSocketMessage {
+    fn validate_message(raw_message: String) -> Result<WebSocketMessage> {
+        let message: WebSocketMessage = serde_json::from_str(&raw_message)?;
+        Ok(message)
     }
 }
 
-fn handle_client_messages(websocket: WebSocketConn, mut redis_conn: Connection, node_uid: Uuid) {
+pub async fn handle_client_conn(
+    server: TcpListener,
+    redis_client: Client
+) {
+    while let Ok((stream, _)) = server.accept().await {
+        let peer_addr = stream.peer_addr().unwrap();
+        let ws_stream = accept_async(stream).await.unwrap();
+        let (ws_send, ws_read) = ws_stream.split();
+
+        let redis_conn_messages = redis_client.get_connection().unwrap();
+        let redis_conn_queue = redis_client.get_connection().unwrap();
+
+        tokio::spawn(handle_client_messages(ws_read, redis_conn_messages));
+        tokio::spawn(handle_client_redis(ws_send, redis_conn_queue, peer_addr.to_string()));
+
+        println!("connected addr: {}", peer_addr);
+    }
+}
+
+async fn handle_client_messages(mut ws_read: WebSocketRead, mut redis_conn: Connection) {
+    let mut interval = tokio::time::interval(Duration::from_millis(1000));
+
     loop {
-        let mut locked_websocket = websocket.lock().unwrap();
-        match locked_websocket.read() {
-            Ok(message) => {
-                redis_conn.publish::<String, String, ()>(node_uid.to_string(), message.to_string()).unwrap();
-            },
-            Err(Error::Io(ref err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                println!("teste");
+        tokio::select! {
+            msg = ws_read.next() => {
+                match msg {
+                    Some(msg) => {
+                        let msg = msg.unwrap();
+                        let message = match WebSocketMessage::validate_message(msg.to_string()) {
+                            Ok(message) => message,
+                            Err(e) => {
+                                eprintln!("Invalid message, error: {}", e);
+                                continue;
+                            }
+                        };
+
+                        redis_conn.publish::<String, String, ()>(message.target_ip, message.content).unwrap();
+                    }
+                    None => break,
+                }
             }
-            Err(e) => eprintln!("{}", e)
+            _ = interval.tick() => {}
         }
     }
 }

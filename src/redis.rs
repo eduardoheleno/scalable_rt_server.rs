@@ -1,16 +1,17 @@
 use redis::Connection;
-use uuid::Uuid;
+use futures_util::SinkExt;
+use tokio_tungstenite::tungstenite::Message::Text;
+use crate::websocket::WebSocketSend;
 
-use crate::websocket::ArcConns;
-
-pub fn handle_redis_channel(mut redis_conn: Connection, connections: ArcConns, node_uid: Uuid) {
+pub async fn handle_client_redis(mut sender: WebSocketSend, mut redis_conn: Connection, peer_addr: String) {
     let mut pubsub = redis_conn.as_pubsub();
-    pubsub.subscribe(node_uid.to_string()).unwrap();
+    pubsub.subscribe(peer_addr).unwrap();
 
     loop {
         let msg = pubsub.get_message().unwrap();
         let payload: String = msg.get_payload().unwrap();
 
-        println!("channel '{}': {}", msg.get_channel_name(), payload);
+        let websocket_message = Text(payload);
+        sender.send(websocket_message).await.unwrap();
     }
 }
