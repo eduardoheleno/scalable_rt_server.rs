@@ -22,3 +22,13 @@ jobs:
       - name: Push Docker image
         run: |
           docker push eduardogomesheleno/rt_server:latest
+
+      - name: SSH to Oracle server and deploy
+        uses: appleboy/ssh-action@v0.1.0
+        with:
+          host: ${{ secrets.ORACLE_SERVER_IP }}
+          username: ${{ secrets.ORACLE_USERNAME }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            cd scalable_rt_server.rs/
+            docker stack deploy -c docker-compose.yml rt_server
