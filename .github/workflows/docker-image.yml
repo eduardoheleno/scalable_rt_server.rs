@@ -29,6 +29,7 @@ jobs:
           host: ${{ secrets.ORACLE_SERVER_IP }}
           username: ${{ secrets.ORACLE_USERNAME }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
+          debug: true
           script: |
             cd scalable_rt_server.rs/
             docker stack deploy -c docker-compose.yml rt_server
