@@ -10,24 +10,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-      # - name: Build Docker image
-      #   run: |
-      #     docker build -t eduardogomesheleno/rt_server:latest .
+      - name: Build Docker image
+        run: |
+          docker build -t eduardogomesheleno/rt_server:latest .
 
-      # - name: Log in to Docker Hub
-      #   run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # - name: Push Docker image
-      #   run: |
-      #     docker push eduardogomesheleno/rt_server:latest
+      - name: Push Docker image
+        run: |
+          docker push eduardogomesheleno/rt_server:latest
 
       - name: SSH to Oracle server and deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: 64.181.191.72
-          username: ubuntu
+          host: ${{ secrets.ORACLE_SERVER_IP }}
+          username: ${{ secrets.ORACLE_USERNAME }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           debug: true
           script: |
