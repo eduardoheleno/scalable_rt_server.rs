@@ -24,7 +24,7 @@ jobs:
       #     docker push eduardogomesheleno/rt_server:latest
 
       - name: SSH to Oracle server and deploy
-        uses: appleboy/ssh-action@v0.1.0
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: 64.181.191.72
           username: ubuntu
