@@ -31,7 +31,13 @@ pub async fn handle_client_conn(
 ) {
     while let Ok((stream, _)) = server.accept().await {
         let peer_addr = stream.peer_addr().unwrap();
-        let ws_stream = accept_async(stream).await.unwrap();
+        let ws_stream = match accept_async(stream).await {
+            Ok(ws_stream) => ws_stream,
+            Err(e) => {
+                eprintln!("{}", e);
+                continue;
+            }
+        };
         let (ws_send, ws_read) = ws_stream.split();
 
         let redis_conn_messages = redis_client.get_connection().unwrap();

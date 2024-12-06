@@ -7,7 +7,6 @@ use utils::ServerConfig;
 
 #[tokio::main]
 async fn main() {
-    println!("teste final");
     let server_config = ServerConfig::init_server().await;
     let _ = tokio::spawn(
         handle_client_conn(
