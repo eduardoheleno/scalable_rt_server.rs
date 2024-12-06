@@ -26,8 +26,8 @@ jobs:
       - name: SSH to Oracle server and deploy
         uses: appleboy/ssh-action@v0.1.0
         with:
-          host: ${{ secrets.ORACLE_SERVER_IP }}
-          username: ${{ secrets.ORACLE_USERNAME }}
+          host: 64.181.191.72
+          username: ubuntu
           key: ${{ secrets.ORACLE_SSH_KEY }}
           debug: true
           script: |
