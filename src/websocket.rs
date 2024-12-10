@@ -1,11 +1,9 @@
-use std::time::Duration;
-use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{StreamExt, stream::{SplitSink, SplitStream}};
 use redis::{Client, Commands, Connection};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use futures_util::StreamExt;
-use crate::redis::handle_client_redis;
+use crate::redis::{handle_client_redis, RedisMessage, MessageContext};
 use serde_json::Result;
 use serde::{Serialize, Deserialize};
 
@@ -43,36 +41,44 @@ pub async fn handle_client_conn(
         let redis_conn_messages = redis_client.get_connection().unwrap();
         let redis_conn_queue = redis_client.get_connection().unwrap();
 
-        tokio::spawn(handle_client_messages(ws_read, redis_conn_messages));
+        tokio::spawn(handle_client_messages(ws_read, redis_conn_messages, peer_addr.to_string()));
         tokio::spawn(handle_client_redis(ws_send, redis_conn_queue, peer_addr.to_string()));
 
         println!("connected addr: {}", peer_addr);
     }
 }
 
-async fn handle_client_messages(mut ws_read: WebSocketRead, mut redis_conn: Connection) {
-    let mut interval = tokio::time::interval(Duration::from_millis(1000));
+fn serialize_redis_message(context: MessageContext, content: Option<String>) -> String {
+    let redis_message = RedisMessage::new(context, content);
+    serde_json::to_string(&redis_message).unwrap()
+}
 
-    loop {
-        tokio::select! {
-            msg = ws_read.next() => {
-                match msg {
-                    Some(msg) => {
-                        let msg = msg.unwrap();
-                        let message = match WebSocketMessage::validate_message(msg.to_string()) {
-                            Ok(message) => message,
-                            Err(e) => {
-                                eprintln!("Invalid message, error: {}", e);
-                                continue;
-                            }
-                        };
+async fn handle_client_messages(mut ws_read: WebSocketRead, mut redis_conn: Connection, peer_addr: String) {
+    while let Some(message) = ws_read.next().await {
+        match message {
+            Ok(message) => match message {
+                Message::Text(data) => {
+                    let validated_message = match WebSocketMessage::validate_message(data) {
+                        Ok(message) => message,
+                        Err(e) => {
+                            eprintln!("Invalid websocket message, error: {}", e);
+                            continue;
+                        }
+                    };
 
-                        redis_conn.publish::<String, String, ()>(message.target_ip, message.content).unwrap();
-                    }
-                    None => break,
-                }
+                    let json_redis_message = serialize_redis_message(MessageContext::Content, Some(validated_message.content));
+                    redis_conn.publish::<String, String, ()>(validated_message.target_ip, json_redis_message).unwrap();
+                },
+                Message::Close(_) => {
+                    let json_redis_message = serialize_redis_message(MessageContext::Close, None);
+                    redis_conn.publish::<String, String, ()>(peer_addr.clone(), json_redis_message).unwrap();
+
+                    println!("IP {}: websocket has disconnected", peer_addr);
+                    break;
+                },
+                _ => ()
             }
-            _ = interval.tick() => {}
+            Err(e) => eprintln!("{}", e)
         }
     }
 }
