@@ -1,6 +1,6 @@
-use std::env;
+use std::{env, panic};
 use tokio::net::TcpListener;
-use redis::Client;
+use redis::{Client, Commands};
 use uuid::Uuid;
 
 pub struct ServerConfig {
@@ -20,6 +20,24 @@ impl ServerConfig {
 
         let server = TcpListener::bind(server_addr).await.unwrap();
         let node_uid = Uuid::new_v4();
+
+        let panic_client = client.clone();
+        panic::set_hook(Box::new(move |_| {
+            let mut panic_connection = match panic_client.get_connection() {
+                Ok(connection) => connection,
+                Err(e) => {
+                    eprintln!("Couldn't get 'panic_connection': {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            let users: Vec<(String, String)> = panic_connection.hgetall("users").unwrap();
+            for (field, value) in users {
+                if value == node_uid.to_string() {
+                    panic_connection.hdel::<&str, String, ()>("users", field).unwrap();
+                }
+            }
+        }));
 
         ServerConfig { node_uid, client, server }
     }
