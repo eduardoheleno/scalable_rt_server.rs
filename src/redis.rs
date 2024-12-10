@@ -8,6 +8,8 @@ use crate::websocket::WebSocketSend;
 #[derive(Serialize, Deserialize)]
 pub enum MessageContext {
     Content,
+    UserConnected,
+    UserDisconnected,
     Close
 }
 
@@ -36,7 +38,7 @@ pub async fn handle_client_redis(mut sender: WebSocketSend, mut redis_conn: Conn
         let msg = pubsub.get_message().unwrap();
         let payload: String = msg.get_payload().unwrap();
 
-        let redis_message = match RedisMessage::validate_message(payload) {
+        let redis_message = match RedisMessage::validate_message(payload.to_string()) {
             Ok(message) => message,
             Err(e) => {
                 eprintln!("Invalid redis message, error: {}", e);
@@ -45,10 +47,8 @@ pub async fn handle_client_redis(mut sender: WebSocketSend, mut redis_conn: Conn
         };
 
         match redis_message.context {
-            MessageContext::Content => {
-                let message_content = redis_message.content.unwrap();
-                let websocket_message = Text(message_content);
-
+            MessageContext::Content | MessageContext::UserConnected | MessageContext::UserDisconnected => {
+                let websocket_message = Text(payload);
                 sender.send(websocket_message).await.unwrap();
             }
             MessageContext::Close => {
