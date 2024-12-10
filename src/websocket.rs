@@ -3,6 +3,7 @@ use redis::{Client, Commands, Connection};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, WebSocketStream};
+use uuid::Uuid;
 use crate::redis::{handle_client_redis, RedisMessage, MessageContext};
 use serde_json::Result;
 use serde::{Serialize, Deserialize};
@@ -25,7 +26,8 @@ impl WebSocketMessage {
 
 pub async fn handle_client_conn(
     server: TcpListener,
-    redis_client: Client
+    mut redis_client: Client,
+    node_uid: Uuid
 ) {
     while let Ok((stream, _)) = server.accept().await {
         let peer_addr = stream.peer_addr().unwrap();
@@ -37,6 +39,8 @@ pub async fn handle_client_conn(
             }
         };
         let (ws_send, ws_read) = ws_stream.split();
+
+        redis_client.hset::<&str, String, String, ()>("users", peer_addr.to_string(), node_uid.to_string()).unwrap();
 
         let redis_conn_messages = redis_client.get_connection().unwrap();
         let redis_conn_queue = redis_client.get_connection().unwrap();
@@ -70,6 +74,8 @@ async fn handle_client_messages(mut ws_read: WebSocketRead, mut redis_conn: Conn
                     redis_conn.publish::<String, String, ()>(validated_message.target_ip, json_redis_message).unwrap();
                 },
                 Message::Close(_) => {
+                    redis_conn.hdel::<&str, String, ()>("users", peer_addr.to_string()).unwrap();
+
                     let json_redis_message = serialize_redis_message(MessageContext::Close, None);
                     redis_conn.publish::<String, String, ()>(peer_addr.clone(), json_redis_message).unwrap();
 

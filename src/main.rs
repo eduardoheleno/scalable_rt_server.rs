@@ -11,7 +11,8 @@ async fn main() {
     let _ = tokio::spawn(
         handle_client_conn(
             server_config.server,
-            server_config.client
+            server_config.client,
+            server_config.node_uid
         )
     ).await;
 }
