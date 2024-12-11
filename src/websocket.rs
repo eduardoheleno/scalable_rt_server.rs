@@ -40,6 +40,22 @@ impl ConnectedUser {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct UserMessage {
+    ip: String,
+    message: String
+}
+
+impl UserMessage {
+    fn new(ip: String, message: String) -> Self {
+        UserMessage { ip, message }
+    }
+
+    fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+}
+
 pub async fn handle_client_conn(
     server: TcpListener,
     mut redis_client: Client,
@@ -84,7 +100,8 @@ async fn handle_client_messages(mut ws_read: WebSocketRead, mut redis_conn: Conn
                         }
                     };
 
-                    let json_redis_message = serialize_redis_message(MessageContext::Content, Some(validated_message.content));
+                    let user_message = UserMessage::new(peer_addr.to_string(), validated_message.content);
+                    let json_redis_message = serialize_redis_message(MessageContext::Content, Some(user_message.to_string()));
                     redis_conn.publish::<String, String, ()>(validated_message.target_ip, json_redis_message).unwrap();
                 },
                 Message::Close(_) => {
@@ -107,7 +124,7 @@ async fn handle_client_messages(mut ws_read: WebSocketRead, mut redis_conn: Conn
 
 fn serialize_redis_message(context: MessageContext, content: Option<String>) -> String {
     let redis_message = RedisMessage::new(context, content);
-    serde_json::to_string(&redis_message).unwrap()
+    redis_message.to_string()
 }
 
 async fn send_current_connected_users(ws_send: &mut SplitSink<WebSocketStream<TcpStream>, Message>, redis_client: &mut Client) {
@@ -115,25 +132,24 @@ async fn send_current_connected_users(ws_send: &mut SplitSink<WebSocketStream<Tc
     let connected_users = ConnectedUser::from_vec(users);
     let connected_users_json = serde_json::to_string(&connected_users).unwrap();
 
-    ws_send.send(Message::Text(connected_users_json)).await.unwrap();
+    let user_list_message = RedisMessage::new(MessageContext::UserList, Some(connected_users_json));
+    ws_send.send(Message::Text(user_list_message.to_string())).await.unwrap();
 }
 
 fn notify_user_disconnection(mut redis_conn: Connection, disconnected_user_ip: String) {
     let users: Vec<(String, String)> = redis_conn.hgetall("users").unwrap();
     let disconnection_message = RedisMessage::new(MessageContext::UserDisconnected, Some(disconnected_user_ip));
-    let disconnection_message_json = serde_json::to_string(&disconnection_message).unwrap();
 
     for (field, _) in users {
-        redis_conn.publish::<String, String, ()>(field, disconnection_message_json.clone()).unwrap();
+        redis_conn.publish::<String, String, ()>(field, disconnection_message.to_string()).unwrap();
     }
 }
 
 fn notify_user_connection(mut redis_conn: Connection, connected_user_ip: String) {
     let users: Vec<(String, String)> = redis_conn.hgetall("users").unwrap();
     let connection_message = RedisMessage::new(MessageContext::UserConnected, Some(connected_user_ip));
-    let connection_message_json = serde_json::to_string(&connection_message).unwrap();
 
     for (field, _) in users {
-        redis_conn.publish::<String, String, ()>(field, connection_message_json.clone()).unwrap();
+        redis_conn.publish::<String, String, ()>(field, connection_message.to_string()).unwrap();
     }
 }
