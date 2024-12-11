@@ -7,9 +7,10 @@ use crate::websocket::WebSocketSend;
 
 #[derive(Serialize, Deserialize)]
 pub enum MessageContext {
-    Content,
+    UserList,
     UserConnected,
     UserDisconnected,
+    Content,
     Close
 }
 
@@ -27,6 +28,10 @@ impl RedisMessage {
     pub fn validate_message(raw_message: String) -> Result<RedisMessage> {
         let message: RedisMessage = serde_json::from_str(&raw_message)?;
         Ok(message)
+    }
+
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
     }
 }
 
@@ -47,7 +52,10 @@ pub async fn handle_client_redis(mut sender: WebSocketSend, mut redis_conn: Conn
         };
 
         match redis_message.context {
-            MessageContext::Content | MessageContext::UserConnected | MessageContext::UserDisconnected => {
+            MessageContext::Content |
+            MessageContext::UserConnected |
+            MessageContext::UserDisconnected |
+            MessageContext::UserList => {
                 let websocket_message = Text(payload);
                 sender.send(websocket_message).await.unwrap();
             }
